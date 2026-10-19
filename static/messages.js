@@ -1396,6 +1396,12 @@ function _restoreComposerDraftAfterFailedSend(draftText, filesSnapshot, sid, cle
   return restoredVisible;
 }
 
+function _composerMessageTextForSend(value){
+  const raw=String(value||'');
+  if(!webuiSlashCommandInterceptionEnabled()&&raw.startsWith('/')) return raw;
+  return raw.trim();
+}
+
 async function send(){
   // Static guards expect _defaultMessageMode to stay near send() while the actual
   // read remains in the S.busy branch below.
@@ -1404,7 +1410,7 @@ async function send(){
   // If a send is already in-flight (e.g. queue drain), re-queue the message
   // instead of silently dropping it.
   if (_sendInProgress) {
-    const _text=_composerTextWithPendingSelections().trim();
+    const _text=_composerMessageTextForSend(_composerTextWithPendingSelections());
     // Use the in-flight session's sid, not the currently viewed session,
     // so the queued message goes to the chat that owns the active stream.
     const _targetSid=_sendInProgressSid||(S.session&&S.session.session_id);
@@ -1423,12 +1429,12 @@ async function send(){
   try{
   const options=arguments[0]||{};
   const literalSlash=!!(options&&options.literalSlash);
-  let text=$('msg').value.trim();
+  let text=_composerMessageTextForSend($('msg').value);
   if(!text&&!S.pendingFiles.length&&!_pendingSelections.length){_sendInProgress=false;_sendInProgressSid=null;return;}
   // Don't send while an inline message edit is active
   if(document.querySelector('.msg-edit-area')){_sendInProgress=false;_sendInProgressSid=null;return;}
   _flushSelectionBlocksToComposer();
-  text=$('msg').value.trim();
+  text=_composerMessageTextForSend($('msg').value);
   if(!text&&!S.pendingFiles.length){_sendInProgress=false;_sendInProgressSid=null;return;}
   if(typeof shouldInterceptCompressionRecoveryContinuation==='function'&&shouldInterceptCompressionRecoveryContinuation(text,S.pendingFiles)){
     if(typeof showCompressionRecoveryContinuationHint==='function') showCompressionRecoveryContinuationHint();
@@ -1470,7 +1476,7 @@ async function send(){
       // cmdSteer / cmdInterrupt say "No active task to stop."
       // /stop must cancel the active run immediately instead of being steered
       // or queued as the literal text "/stop" (#6951).
-      if(text.startsWith('/')&&!literalSlash){
+      if(text.startsWith('/')&&webuiSlashCommandInterceptionEnabled()&&!literalSlash){
         const _pc=typeof parseCommand==='function'&&parseCommand(text);
         if(_pc&&['steer','interrupt','queue','terminal','goal','yolo','stop'].includes(_pc.name)){
           const _bc=COMMANDS.find(c=>c.name===_pc.name);
@@ -1526,13 +1532,14 @@ async function send(){
   }
   let _slashDisplayTextOverride=null;
   let _pendingMoaConfig=null;
-  // Slash command intercept -- local commands handled without agent round-trip.
+  // Slash command intercept -- local commands handled without agent round-trip
+  // only when the deployment explicitly opts into legacy interception.
   // We push the user message BEFORE running the handler for echo-worthy
   // commands so chat order is correct: some handlers (e.g. cmdHelp) push
   // their assistant response synchronously.  If we pushed AFTER, S.messages
   // would be [assistant, user] and the chat would show the response above
   // the user's own input — reverse chronological order (#840 ordering bug).
-  if(text.startsWith('/')&&!S.pendingFiles.length&&!literalSlash){
+  if(text.startsWith('/')&&webuiSlashCommandInterceptionEnabled()&&!S.pendingFiles.length&&!literalSlash){
     const _parsedCmd=parseCommand(text);
     const _cmd=_parsedCmd?COMMANDS.find(c=>c.name===_parsedCmd.name):null;
     if(_cmd){
